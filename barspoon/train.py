@@ -81,6 +81,7 @@ def main():
         valid_bags=valid_df.path.values,
         valid_targets={k: v.encoded for k, v in valid_encoded_targets.items()},
         instances_per_bag=args.instances_per_bag,
+        pad=args.pad,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
     )
@@ -252,6 +253,7 @@ def make_argument_parser() -> argparse.ArgumentParser:
 
     training_parser = parser.add_argument_group("training options")
     training_parser.add_argument("--instances-per-bag", type=int, default=2**12)
+    training_parser.add_argument("--no-pad", action="store_false", dest="pad")
     training_parser.add_argument("--learning-rate", type=float, default=1e-4)
     training_parser.add_argument("--batch-size", type=int, default=4)
     training_parser.add_argument("--accumulate-grad-samples", type=int, default=32)
@@ -274,12 +276,14 @@ def make_dataloaders(
     valid_targets: Mapping[str, torch.Tensor],
     batch_size: int,
     instances_per_bag: int,
+    pad: bool,
     num_workers: int,
 ) -> Tuple[DataLoader, DataLoader]:
     train_ds = BagDataset(
         bags=train_bags,
         targets=train_targets,
         instances_per_bag=instances_per_bag,
+        pad=pad,
         deterministic=False,
     )
     train_dl = DataLoader(
@@ -290,6 +294,7 @@ def make_dataloaders(
         bags=valid_bags,
         targets=valid_targets,
         instances_per_bag=instances_per_bag,
+        pad=pad,
         deterministic=True,
     )
     valid_dl = DataLoader(valid_ds, batch_size=batch_size, num_workers=num_workers)

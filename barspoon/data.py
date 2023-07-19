@@ -25,6 +25,8 @@ class BagDataset(Dataset):
     """The label of each bag"""
     instances_per_bag: Optional[int]
     """The number of instances to sample, or all samples if None"""
+    pad: bool = True
+    """Whether to pad the features with zeros if there are too few instances"""
     deterministic: bool = True
     """Whether to sample deterministically
     
@@ -73,6 +75,7 @@ class BagDataset(Dataset):
                     coords,
                     n=self.instances_per_bag,
                     deterministic=self.deterministic,
+                    pad=self.pad
                 )
 
             feat_list.append(feats.float())
@@ -84,12 +87,13 @@ class BagDataset(Dataset):
         # to ensure that each of the bags gets represented
         # Otherwise, drastically larger bags could "drown out"
         # the few instances of the smaller bags
-        if self.instances_per_bag is not None:
+        if self.instances_per_bag:
             feats, coords = pad_or_sample(
                 feats,
                 coords,
                 n=self.instances_per_bag,
                 deterministic=self.deterministic,
+                pad=self.pad
             )
 
         return (
@@ -99,16 +103,19 @@ class BagDataset(Dataset):
         )
 
 
-def pad_or_sample(*xs: torch.Tensor, n: int, deterministic: bool) -> List[torch.Tensor]:
+def pad_or_sample(*xs: torch.Tensor, n: int, deterministic: bool, pad: bool = True) -> List[torch.Tensor]:
     assert (
         len(set(x.shape[0] for x in xs)) == 1
     ), "all inputs have to be of equal length"
     length = xs[0].shape[0]
 
     if length <= n:
+        if not pad:
+            return list(xs)
         # Too few features; pad with zeros
         pad_size = n - length
-        padded = [torch.cat([x, torch.zeros(pad_size, *x.shape[1:])]) for x in xs]
+        padded = [torch.cat([x, torch.zeros(pad_size, *x.shape[1:])])
+                  for x in xs]
         return padded
     elif deterministic:
         # Sample equidistantly

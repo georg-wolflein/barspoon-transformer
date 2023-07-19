@@ -75,6 +75,7 @@ def main():
             test_bags=test_df.path.values,
             test_targets={k: v.encoded for k, v in test_encoded_targets.items()},
             instances_per_bag=args.instances_per_bag,
+            pad=args.pad,
             batch_size=args.batch_size,
             num_workers=args.num_workers,
         )
@@ -228,9 +229,16 @@ def make_argument_parser() -> argparse.ArgumentParser:
     model_parser.add_argument("--num-decoder-layers", type=int, default=2)
     model_parser.add_argument("--d-model", type=int, default=512)
     model_parser.add_argument("--dim-feedforward", type=int, default=2048)
+    model_parser.add_argument("--abs-pos-enc", type=str, choices=["maru", "axial", "fourier"], 
+                              default=None, dest="absolute_positional_encoding")
+    model_parser.add_argument("--rel-pos-enc", type=str, choices=["continuous", "discrete"], 
+                              default=None, dest="relative_positional_encoding")
+    model_parser.add_argument("--rel-pos-enc-bins", type=int,
+                              default=2, dest="relative_positional_encoding_bins")
 
     training_parser = parser.add_argument_group("training options")
     training_parser.add_argument("--instances-per-bag", type=int, default=2**12)
+    training_parser.add_argument("--no-pad", action="store_false", dest="pad")
     training_parser.add_argument("--learning-rate", type=float, default=1e-4)
     training_parser.add_argument("--batch-size", type=int, default=4)
     training_parser.add_argument("--accumulate-grad-samples", type=int, default=32)
@@ -294,13 +302,15 @@ def make_dataloaders(
     test_targets: torch.Tensor,
     batch_size: int,
     instances_per_bag: int,
+    pad: bool,
     num_workers: int,
 ) -> Tuple[DataLoader, DataLoader, DataLoader]:
     train_ds = BagDataset(
         bags=train_bags,
         targets=train_targets,
         instances_per_bag=instances_per_bag,
-        deterministic=False,
+        pad=pad,
+        deterministic=False
     )
     train_dl = DataLoader(
         train_ds, batch_size=batch_size, num_workers=num_workers, shuffle=True
@@ -310,6 +320,7 @@ def make_dataloaders(
         bags=valid_bags,
         targets=valid_targets,
         instances_per_bag=instances_per_bag,
+        pad=pad,
         deterministic=True,
     )
     valid_dl = DataLoader(valid_ds, batch_size=batch_size, num_workers=num_workers)
@@ -318,6 +329,7 @@ def make_dataloaders(
         bags=test_bags,
         targets=test_targets,
         instances_per_bag=instances_per_bag,
+        pad=pad,
         deterministic=True,
     )
     test_dl = DataLoader(test_ds, batch_size=batch_size, num_workers=num_workers)
