@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader
 from barspoon.data import BagDataset
 from barspoon.model import LitEncDecTransformer
 from barspoon.target_file import encode_targets
-from barspoon.utils import flatten_batched_dicts, make_dataset_df, make_preds_df
+from barspoon.utils import flatten_batched_dicts, make_dataset_df, make_preds_df, DummyBiggestBatchFirstCallback
 
 
 def main():
@@ -113,6 +113,7 @@ def main():
                 mode="min",
                 filename="checkpoint-{epoch:02d}-{val_loss:0.3f}",
             ),
+            DummyBiggestBatchFirstCallback(train_dl.dataset.dummy_batch(args.batch_size))
         ],
         max_epochs=args.max_epochs,
         # FIXME The number of accelerators is currently fixed to one for the
@@ -123,7 +124,7 @@ def main():
         accelerator=args.accelerator,
         devices=1,
         accumulate_grad_batches=args.accumulate_grad_samples // args.batch_size,
-        gradient_clip_val=0.5,
+        gradient_clip_val=args.grad_clip,
         logger=CSVLogger(save_dir=args.output_dir),
     )
 
@@ -244,12 +245,14 @@ def make_argument_parser() -> argparse.ArgumentParser:
     model_parser.add_argument("--num-decoder-layers", type=int, default=2)
     model_parser.add_argument("--d-model", type=int, default=512)
     model_parser.add_argument("--dim-feedforward", type=int, default=2048)
-    model_parser.add_argument("--abs-pos-enc", type=str, choices=["maru", "axial", "fourier"], 
+    model_parser.add_argument("--abs-pos-enc", type=str, choices=["maru", "axial", "fourier"],
                               default=None, dest="absolute_positional_encoding")
-    model_parser.add_argument("--rel-pos-enc", type=str, choices=["continuous", "discrete"], 
+    model_parser.add_argument("--rel-pos-enc", type=str, choices=["continuous", "discrete"],
                               default=None, dest="relative_positional_encoding")
     model_parser.add_argument("--rel-pos-enc-bins", type=int,
                               default=2, dest="relative_positional_encoding_bins")
+    model_parser.add_argument("--rel-pos-enc-layers", type=int,
+                              default=1, dest="relative_positional_encoding_layers")
 
     training_parser = parser.add_argument_group("training options")
     training_parser.add_argument("--instances-per-bag", type=int, default=2**12)
@@ -257,6 +260,7 @@ def make_argument_parser() -> argparse.ArgumentParser:
     training_parser.add_argument("--learning-rate", type=float, default=1e-4)
     training_parser.add_argument("--batch-size", type=int, default=4)
     training_parser.add_argument("--accumulate-grad-samples", type=int, default=32)
+    training_parser.add_argument("--grad-clip", type=float, default=.5)
     training_parser.add_argument(
         "--num-workers", type=int, default=min(os.cpu_count() or 0, 8)
     )

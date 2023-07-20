@@ -122,7 +122,7 @@ def main():
             accelerator=args.accelerator,
             devices=1,
             accumulate_grad_batches=args.accumulate_grad_samples // args.batch_size,
-            gradient_clip_val=0.5,
+            gradient_clip_val=args.grad_clip,
             logger=CSVLogger(save_dir=fold_dir),
         )
 
@@ -235,6 +235,9 @@ def make_argument_parser() -> argparse.ArgumentParser:
                               default=None, dest="relative_positional_encoding")
     model_parser.add_argument("--rel-pos-enc-bins", type=int,
                               default=2, dest="relative_positional_encoding_bins")
+    model_parser.add_argument("--rel-pos-enc-layers", type=int,
+                              default=1, dest="relative_positional_encoding_layers")
+
 
     training_parser = parser.add_argument_group("training options")
     training_parser.add_argument("--instances-per-bag", type=int, default=2**12)
@@ -242,6 +245,7 @@ def make_argument_parser() -> argparse.ArgumentParser:
     training_parser.add_argument("--learning-rate", type=float, default=1e-4)
     training_parser.add_argument("--batch-size", type=int, default=4)
     training_parser.add_argument("--accumulate-grad-samples", type=int, default=32)
+    training_parser.add_argument("--grad-clip", type=float, default=.5)
     training_parser.add_argument(
         "--num-workers", type=int, default=min(os.cpu_count() or 0, 8)
     )

@@ -1,6 +1,9 @@
 import logging
 from pathlib import Path
 from typing import Dict, Iterable, Literal, Mapping, Optional, Sequence, Union
+import pytorch_lightning as pl
+from pytorch_lightning.callbacks import Callback
+from pytorch_lightning import LightningModule, Trainer
 
 import numpy as np
 import pandas as pd
@@ -159,3 +162,21 @@ def flatten_batched_dicts(
     keys = list(dicts[0].keys())
 
     return {k: torch.cat([x[k] for x in dicts]) for k in keys}
+
+class DummyBiggestBatchFirstCallback(Callback):
+    """A callback that runs a forward pass with a big batch of dummy data. 
+
+    This is useful when each batch contains a different number of instances, so that the model can allocate enough memory for the biggest batch.
+    This may fix CUDA out of memory errors.
+    """
+    def __init__(self, dummy_batch):
+        self.dummy_batch = dummy_batch
+
+    def on_train_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        print(f"Running a forward pass with a big batch of dummy data to allocate enough memory for the biggest batch")
+        pl_module.train()
+        batch = pl_module.transfer_batch_to_device(self.dummy_batch, pl_module.device, -1)
+        loss = pl_module.step(batch, step_name=None)
+        loss.backward()
+        pl_module.zero_grad()
+        print(f"Done")
