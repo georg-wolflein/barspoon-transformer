@@ -286,9 +286,22 @@ class DistanceAwareTransformerEncoderLayer(nn.Module):
         norm_first: bool = False,
         device=None,
         dtype=None,
+        # Relative position representation-specific arguments
         continuous: bool = True,
         bins: int = 2
     ) -> None:
+        self._base_kwargs = {
+            "d_model": d_model,
+            "nhead": nhead,
+            "dim_feedforward": dim_feedforward,
+            "dropout": dropout,
+            "activation": activation,
+            "layer_norm_eps": layer_norm_eps,
+            "batch_first": batch_first,
+            "norm_first": norm_first,
+            "device": device,
+            "dtype": dtype
+        }
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.self_attn = DistanceAwareMultiheadAttention(
@@ -336,14 +349,23 @@ class DistanceAwareTransformerEncoderLayer(nn.Module):
         x = self.linear2(self.dropout(self.activation(self.linear1(x))))
         return self.dropout2(x)
 
+    def clone_as_native(self) -> nn.TransformerEncoderLayer:
+        """Copy this layer as a native nn.TransformerEncoderLayer."""
+        return nn.TransformerEncoderLayer(**self._base_kwargs)
+
 
 class DistanceAwareTransformerEncoder(nn.Module):
     __constants__ = ['norm']
 
-    def __init__(self, encoder_layer, num_layers, norm=None, enable_nested_tensor=True, mask_check=True):
+    def __init__(self, encoder_layer: DistanceAwareTransformerEncoderLayer, num_layers, norm=None, enable_nested_tensor=True, mask_check=True, num_dist_aware_layers: int = 1):
         super().__init__()
-        self.layers = nn.modules.transformer._get_clones(
-            encoder_layer, num_layers)
+        # Only do the distance-aware shenanigans on the first num_dist_aware_layers layers
+        if num_dist_aware_layers is None:
+            num_dist_aware_layers = num_layers
+        self.dist_aware_layers = nn.modules.transformer._get_clones(
+            encoder_layer, num_dist_aware_layers)
+        self.native_layers = nn.modules.transformer._get_clones(
+            encoder_layer.clone_as_native(), num_layers-num_dist_aware_layers)
         self.num_layers = num_layers
         self.norm = norm
         self.enable_nested_tensor = enable_nested_tensor
@@ -354,9 +376,11 @@ class DistanceAwareTransformerEncoder(nn.Module):
             src: torch.Tensor,
             tile_positions: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         output = src
-        for mod in self.layers:
-            output = mod(
-                output, *args, tile_positions=tile_positions, **kwargs)
+        for mod in self.dist_aware_layers:
+            output = mod(output, *args,
+                         tile_positions=tile_positions, **kwargs)
+        for mod in self.native_layers:
+            output = mod(output, *args, **kwargs)
 
         if self.norm is not None:
             output = self.norm(output)

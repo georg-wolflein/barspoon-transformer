@@ -113,7 +113,9 @@ class EncDecTransformer(nn.Module):
         relative_positional_encoding: Optional[str]
             = None,  # "discrete" or "continuous"
         relative_positional_encoding_bins: int
-            = 2  # must be 2 if relative_positional_encoding is "continuous"
+            = 2,  # must be 2 if relative_positional_encoding is "continuous"
+        relative_positional_encoding_layers: int
+            = 1  # number of layers to use for relative positional encoding (0 <= n <= num_encoder_layers)
     ) -> None:
         super().__init__()
 
@@ -138,8 +140,12 @@ class EncDecTransformer(nn.Module):
                 DistanceAwareTransformerEncoderLayer,
                 continuous=relative_positional_encoding == "continuous",
                 bins=relative_positional_encoding_bins,
+                
             )
-            encoder_factory = DistanceAwareTransformerEncoder
+            encoder_factory = partial(
+                DistanceAwareTransformerEncoder,
+                num_dist_aware_layers=relative_positional_encoding_layers
+            )
 
         encoder_layer = encoder_layer_factory(
             d_model=d_model,
@@ -154,21 +160,23 @@ class EncDecTransformer(nn.Module):
 
         self.target_labels = target_n_outs.keys()
 
-        # One class token per output label
-        self.class_tokens = nn.ParameterDict(
-            {sanitize(target_label): torch.rand(d_model) for target_label in target_n_outs}
-        )
+        if num_decoder_layers > 0:
 
-        decoder_layer = nn.TransformerDecoderLayer(
-            d_model=d_model,
-            nhead=num_decoder_heads,
-            dim_feedforward=dim_feedforward,
-            batch_first=True,
-            norm_first=True,
-        )
-        self.transformer_decoder = nn.TransformerDecoder(
-            decoder_layer, num_layers=num_decoder_layers
-        )
+            # One class token per output label
+            self.class_tokens = nn.ParameterDict(
+                {sanitize(target_label): torch.rand(d_model) for target_label in target_n_outs}
+            )
+
+            decoder_layer = nn.TransformerDecoderLayer(
+                d_model=d_model,
+                nhead=num_decoder_heads,
+                dim_feedforward=dim_feedforward,
+                batch_first=True,
+                norm_first=True,
+            )
+            self.transformer_decoder = nn.TransformerDecoder(
+                decoder_layer, num_layers=num_decoder_layers
+            )
 
         self.heads = nn.ModuleDict(
             {
@@ -196,20 +204,29 @@ class EncDecTransformer(nn.Module):
             encoder_kwargs["tile_positions"] = tile_positions
         tile_tokens = self.transformer_encoder(tile_tokens, **encoder_kwargs)
 
-        class_tokens = torch.stack(
-            [self.class_tokens[sanitize(t)] for t in self.target_labels]
-        ).expand(batch_size, -1, -1)
-        class_tokens = self.transformer_decoder(tgt=class_tokens, memory=tile_tokens)
+        if hasattr(self, "transformer_decoder"):
+            class_tokens = torch.stack(
+                [self.class_tokens[sanitize(t)] for t in self.target_labels]
+            ).expand(batch_size, -1, -1)
+            class_tokens = self.transformer_decoder(tgt=class_tokens, memory=tile_tokens)
 
-        # Apply the corresponding head to each class token
-        logits = {
-            target_label: self.heads[sanitize(target_label)](class_token)
-            for target_label, class_token in zip(
-                self.target_labels,
-                class_tokens.permute(1, 0, 2),  # Permute to [target, batch, d_model]
-                strict=True,
-            )
-        }
+            # Apply the corresponding head to each class token
+            logits = {
+                target_label: self.heads[sanitize(target_label)](class_token)
+                for target_label, class_token in zip(
+                    self.target_labels,
+                    class_tokens.permute(1, 0, 2),  # Permute to [target, batch, d_model]
+                    strict=True,
+                )
+            }
+        else:
+            # Aggregate the tile tokens
+            slide_tokens = tile_tokens.mean(dim=-2)
+            # Apply the corresponding head to each slide-level token
+            logits = {
+                target_label: self.heads[sanitize(target_label)](slide_tokens)
+                for target_label in self.target_labels
+            }
 
         return logits
 
@@ -355,6 +372,7 @@ class LitEncDecTransformer(LitMilClassificationMixin):
         absolute_positional_encoding: Optional[str] = None,
         relative_positional_encoding: Optional[str] = None,
         relative_positional_encoding_bins: int = 2,
+        relative_positional_encoding_layers: int = 1,
         **hparams: Any,
     ) -> None:
         super().__init__(
@@ -375,6 +393,7 @@ class LitEncDecTransformer(LitMilClassificationMixin):
             absolute_positional_encoding=absolute_positional_encoding,
             relative_positional_encoding=relative_positional_encoding,
             relative_positional_encoding_bins=relative_positional_encoding_bins,
+            relative_positional_encoding_layers=relative_positional_encoding_layers,
         )
 
         self.save_hyperparameters()
